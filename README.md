@@ -1,101 +1,133 @@
-# CUDA Course
+以下是该 CUDA 课程 GitHub 仓库主页的中文翻译：
 
-GitHub Repo for CUDA Course on FreeCodeCamp
+---
 
-> Note: This course is designed for Ubuntu Linux. Windows users can use Windows Subsystem for Linux or Docker containers to simulate the ubuntu Linux environment.
+# CUDA 课程
 
-## Table of Contents
+FreeCodeCamp 上的 CUDA 课程 GitHub 仓库
 
-1. [The Deep Learning Ecosystem](01_Deep_Learning_Ecosystem/README.md)
-2. [Setup/Installation](02_Setup/README.md)
-3. [C/C++ Review](03_C_and_C++_Review/README.md)
-4. [Gentle Intro to GPUs](04_Gentle_Intro_to_GPUs/README.md)
-5. [Writing Your First Kernels](05_Writing_your_First_Kernels/README.md)
-6. [CUDA APIs (cuBLAS, cuDNN, etc)](06_CUDA_APIs/README.md)
-7. [Optimizing Matrix Multiplication](07_Faster_Matmul/README.md)
+> 注意：本课程专为 Ubuntu Linux 设计。Windows 用户可以使用 Windows 子系统 (WSL) 或 Docker 容器来模拟 Ubuntu 环境。
+
+---
+
+## 目录
+
+1. [深度学习生态系统](01_Deep_Learning_Ecosystem/README.md)
+2. [环境设置/安装](02_Setup/README.md)
+3. [C/C++ 回顾](03_C_and_C++_Review/README.md)
+4. [GPU 入门简介](04_Gentle_Intro_to_GPUs/README.md)
+5. [编写你的第一个 CUDA 内核](05_Writing_your_First_Kernels/README.md)
+6. [CUDA API（cuBLAS、cuDNN 等）](06_CUDA_APIs/README.md)
+7. [优化矩阵乘法](07_Faster_Matmul/README.md)
 8. [Triton](08_Triton/README.md)
-9. [PyTorch Extensions (CUDA)](08_PyTorch_Extensions/README.md)
-10. [Final Project](09_Final_Project/README.md)
-11. [Extras](10_Extras/README.md)
+9. [PyTorch CUDA 扩展](08_PyTorch_Extensions/README.md)
+10. [期末项目](09_Final_Project/README.md)
+11. [补充资料](10_Extras/README.md)
 
-## Course Philosophy
+---
 
-This course aims to:
+## 课程理念
 
-- Lower the barrier to entry for HPC jobs
-- Provide a foundation for understanding projects like Karpathy's [llm.c](https://github.com/karpathy/llm.c)
-- Consolidate scattered CUDA programming resources into a comprehensive, organized course
+本课程旨在：
 
-## Overview
+* 降低进入高性能计算（HPC）工作的门槛
+* 为理解如 Karpathy 的 [llm.c](https://github.com/karpathy/llm.c) 等项目打下基础
+* 将分散的 CUDA 编程资源整合成一个全面、有条理的课程
 
-- Focus on GPU kernel optimization for performance improvement
-- Cover CUDA, PyTorch, and Triton
-- Emphasis on technical details of writing faster kernels
-- Tailored for NVIDIA GPUs
-- Culminates in a simple MLP MNIST project in CUDA
+---
 
-## Prerequisites
+## 课程概述
 
-- Python programming (required)
-- Basic differentiation and vector calculus for backprop (recommended)
-- Linear algebra fundamentals (recommended)
+* 专注于 GPU 内核优化以提升性能
+* 涵盖 CUDA、PyTorch 和 Triton
+* 注重编写高效内核的技术细节
+* 针对 NVIDIA GPU 进行设计
+* 最终项目是使用 CUDA 实现一个简单的 MLP 识别 MNIST
 
-## Key Takeaways
+---
 
-- Optimizing existing implementations
-- Building CUDA kernels for cutting-edge research
-- Understanding GPU performance bottlenecks, especially memory bandwidth
+## 先修知识
 
-## Hardware Requirements
+* **必须：** Python 编程基础
+* **推荐：** 反向传播中的微分和向量微积分
+* **推荐：** 线性代数基础
 
-- Any NVIDIA GTX, RTX, or datacenter level GPU
-- Cloud GPU options available for those without local hardware
+---
 
-## Use Cases for CUDA/GPU Programming
+## 你将学到
 
-- Deep Learning (primary focus of this course)
-- Graphics and Ray-tracing
-- Fluid Simulation
-- Video Editing
-- Crypto Mining
-- 3D modeling
-- Anything that requires parallel processing with large arrays
+* 优化已有实现的方法
+* 构建用于前沿研究的 CUDA 内核
+* 理解 GPU 性能瓶颈，特别是内存带宽相关问题
 
-## Resources
+---
 
-- GitHub repo (this repository)
-- Stack Overflow
-- NVIDIA Developer Forums
-- NVIDIA and PyTorch documentation
-- LLMs for navigating the space
-- Cheatsheet [here](/11_Extras/assets/cheatsheet.md)
-## Other Learning Material
+## 硬件要求
 
-- https://github.com/CoffeeBeforeArch/cuda_programming
-- https://www.youtube.com/@GPUMODE
-- https://discord.com/invite/gpumode
+* 任意 NVIDIA GTX、RTX 或数据中心级 GPU
+* 没有本地硬件？可使用云端 GPU 资源
 
-## Fun YouTube Videos:
-- [How do GPUs works? Exploring GPU Architecture](https://www.youtube.com/watch?v=h9Z4oGN89MU)
-- [But how do GPUs actually work?](https://www.youtube.com/watch?v=58jtf24uijw&ab_channel=Graphicode)
-- [Getting Started With CUDA for Python Programmers](https://www.youtube.com/watch?v=nOxKexn3iBo&ab_channel=JeremyHoward)
-- [Transformers Explained From The Atom Up](https://www.youtube.com/watch?v=7lJZHbg0EQ4&ab_channel=JacobRintamaki)
-- [How CUDA Programming Works - Stephen Jones, CUDA Architect, NVIDIA](https://www.youtube.com/watch?v=QQceTDjA4f4&ab_channel=ChristopherHollinworth)
-- [Parallel Computing with Nvidia CUDA - NeuralNine](https://www.youtube.com/watch?v=zSCdTOKrnII&ab_channel=NeuralNine)
-- [CPU vs GPU vs TPU vs DPU vs QPU](https://www.youtube.com/watch?v=r5NQecwZs1A&ab_channel=Fireship)
-- [Nvidia CUDA in 100 Seconds](https://www.youtube.com/watch?v=pPStdjuYzSI&ab_channel=Fireship)
-- [How AI Discovered a Faster Matrix Multiplication Algorithm](https://www.youtube.com/watch?v=fDAPJ7rvcUw&t=1s&ab_channel=QuantaMagazine)
-- [The fastest matrix multiplication algorithm](https://www.youtube.com/watch?v=sZxjuT1kUd0&ab_channel=Dr.TreforBazett)
-- [From Scratch: Cache Tiled Matrix Multiplication in CUDA](https://www.youtube.com/watch?v=ga2ML1uGr5o&ab_channel=CoffeeBeforeArch)
-- [From Scratch: Matrix Multiplication in CUDA](https://www.youtube.com/watch?v=DpEgZe2bbU0&ab_channel=CoffeeBeforeArch)
-- [Intro to GPU Programming](https://www.youtube.com/watch?v=G-EimI4q-TQ&ab_channel=TomNurkkala)
-- [CUDA Programming](https://www.youtube.com/watch?v=xwbD6fL5qC8&ab_channel=TomNurkkala)
-- [Intro to CUDA (part 1): High Level Concepts](https://www.youtube.com/watch?v=4APkMJdiudU&ab_channel=JoshHolloway)
-- [Intro to GPU Hardware](https://www.youtube.com/watch?v=kUqkOAU84bA&ab_channel=TomNurkkala)
+---
 
-## Find me
+## CUDA/GPU 编程应用场景
 
-- [Twitter/X](https://x.com/elliotarledge)
-- [LinkedIn](https://www.linkedin.com/in/elliot-arledge-a392b7243/)
-- [YouTube](https://www.youtube.com/channel/UCjlt_l6MIdxi4KoxuMjhYxg)
-- [Discord](https://discord.gg/JTTcFe7Pw2)
+* 深度学习（本课程重点）
+* 图形学和光线追踪
+* 流体模拟
+* 视频编辑
+* 加密货币挖矿
+* 3D 建模
+* 任何需要并行处理大规模数组的场景
+
+---
+
+## 学习资源
+
+* 本 GitHub 仓库
+* Stack Overflow
+* NVIDIA 开发者论坛
+* NVIDIA 和 PyTorch 官方文档
+* 使用大型语言模型（LLM）辅助探索
+* [速查表](11_Extras/assets/cheatsheet.md)
+
+---
+
+## 其他学习资料
+
+* [https://github.com/CoffeeBeforeArch/cuda\_programming](https://github.com/CoffeeBeforeArch/cuda_programming)
+* [https://www.youtube.com/@GPUMODE](https://www.youtube.com/@GPUMODE)
+* [https://discord.com/invite/gpumode](https://discord.com/invite/gpumode)
+
+---
+
+## 有趣的 YouTube 视频推荐
+
+* [GPU 是怎么工作的？探讨 GPU 架构](https://www.youtube.com/watch?v=h9Z4oGN89MU)
+* [GPU 的工作原理到底是什么？](https://www.youtube.com/watch?v=58jtf24uijw&ab_channel=Graphicode)
+* [面向 Python 程序员的 CUDA 入门](https://www.youtube.com/watch?v=nOxKexn3iBo&ab_channel=JeremyHoward)
+* [从原子层面讲解 Transformer](https://www.youtube.com/watch?v=7lJZHbg0EQ4&ab_channel=JacobRintamaki)
+* [CUDA 编程如何工作 - NVIDIA CUDA 架构师 Stephen Jones](https://www.youtube.com/watch?v=QQceTDjA4f4&ab_channel=ChristopherHollinworth)
+* [使用 NVIDIA CUDA 的并行计算 - NeuralNine](https://www.youtube.com/watch?v=zSCdTOKrnII&ab_channel=NeuralNine)
+* [CPU vs GPU vs TPU vs DPU vs QPU](https://www.youtube.com/watch?v=r5NQecwZs1A&ab_channel=Fireship)
+* [100 秒讲清楚 CUDA 是什么](https://www.youtube.com/watch?v=pPStdjuYzSI&ab_channel=Fireship)
+* [AI 如何发现更快的矩阵乘法算法](https://www.youtube.com/watch?v=fDAPJ7rvcUw&t=1s&ab_channel=QuantaMagazine)
+* [最快的矩阵乘法算法](https://www.youtube.com/watch?v=sZxjuT1kUd0&ab_channel=Dr.TreforBazett)
+* [从零开始：使用缓存分块进行 CUDA 矩阵乘法](https://www.youtube.com/watch?v=ga2ML1uGr5o&ab_channel=CoffeeBeforeArch)
+* [从零开始：CUDA 中的矩阵乘法](https://www.youtube.com/watch?v=DpEgZe2bbU0&ab_channel=CoffeeBeforeArch)
+* [GPU 编程入门](https://www.youtube.com/watch?v=G-EimI4q-TQ&ab_channel=TomNurkkala)
+* [CUDA 编程](https://www.youtube.com/watch?v=xwbD6fL5qC8&ab_channel=TomNurkkala)
+* [CUDA 入门（第一部分）：高级概念](https://www.youtube.com/watch?v=4APkMJdiud0&ab_channel=JoshHolloway)
+* [GPU 硬件简介](https://www.youtube.com/watch?v=kUqkOAU84bA&ab_channel=TomNurkkala)
+
+---
+
+## 联系我
+
+* [X（推特）](https://x.com/elliotarledge)
+* [LinkedIn](https://www.linkedin.com/in/elliot-arledge-a392b7243/)
+* [YouTube](https://www.youtube.com/channel/UCjlt_l6MIdxi4KoxuMjhYxg)
+* [Discord](https://discord.gg/JTTcFe7Pw2)
+
+---
+
+如需继续了解课程内容的具体模块，我也可以帮你快速提炼每一章要点。是否需要？
