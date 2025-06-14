@@ -1,3 +1,20 @@
+// ============================================================================
+//  文件名：gemm_benchmark_with_chinese_comments.cu
+//  作者：ChatGPT
+//  功能：在同一程序中基准测试 4 种 GPU 矩阵乘实现，并与朴素 CUDA Kernel 对比
+//        1)  cuBLAS   ‑ FP32 (cublasSgemm)
+//        2)  cuBLASLt ‑ FP32 (cublasLtMatmul + CUDA_R_32F)
+//        3)  cuBLAS   ‑ FP16 (cublasHgemm)
+//        4)  cuBLASLt ‑ FP16 (cublasLtMatmul + CUDA_R_16F)
+//        同时给出 Max 绝对误差验证，并测量平均运行时间 (ms)。
+//  说明：
+//  * 使用列主序 (column‑major) 参数接口，遵循 cuBLAS 约定。
+//  * 提供基于 CUDA Event 的计时函数，以及 "warmup + 重复" 方式计算平均时间。
+//  * 支持大矩阵 (4096×1024 × 1024×4096) 的性能验证，可自行修改 M/K/N。
+//  * 演示 GPU half <‑> float 转换与误差评估流程。
+//  环境：CUDA 11+，支持 Tensor Core 的 NVIDIA GPU。
+// ============================================================================
+
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <cublasLt.h>
@@ -9,28 +26,42 @@
 #include <random>
 #include <numeric>
 
-#define CHECK_CUDA(call) { \
-    cudaError_t status = call; \
-    if (status != cudaSuccess) { \
-        std::cerr << "CUDA error at line " << __LINE__ << ": " << cudaGetErrorString(status) << std::endl; \
-        exit(EXIT_FAILURE); \
-    } \
-}
+// ----------------------------
+// (1) 错误检查宏
+// ----------------------------
+#define CHECK_CUDA(call)                                    \
+    do {                                                    \
+        cudaError_t status = (call);                        \
+        if (status != cudaSuccess) {                        \
+            std::cerr << "CUDA error at line " << __LINE__  \
+                      << ": " << cudaGetErrorString(status) \
+                      << std::endl;                         \
+            exit(EXIT_FAILURE);                             \
+        }                                                   \
+    } while (0)
 
-#define CHECK_CUBLAS(call) { \
-    cublasStatus_t status = call; \
-    if (status != CUBLAS_STATUS_SUCCESS) { \
-        std::cerr << "cuBLAS error at line " << __LINE__ << ": " << status << std::endl; \
-        exit(EXIT_FAILURE); \
-    } \
-}
+#define CHECK_CUBLAS(call)                                   \
+    do {                                                    \
+        cublasStatus_t status = (call);                     \
+        if (status != CUBLAS_STATUS_SUCCESS) {              \
+            std::cerr << "cuBLAS error at line " << __LINE__ \
+                      << ": " << status << std::endl;        \
+            exit(EXIT_FAILURE);                             \
+        }                                                   \
+    } while (0)
 
-const int M = 4096;
-const int K = 1024;
-const int N = 4096;
+// ----------------------------
+// (2) 矩阵尺寸 (可修改)
+// ----------------------------
+const int M = 4096;   // A 行数 / C 行数
+const int K = 1024;   // A 列数 / B 行数
+const int N = 4096;   // B 列数 / C 列数
 
-// Naive CUDA kernel for matrix multiplication
-__global__ void naiveMatrixMultiply(const float* A, const float* B, float* C, int M, int N, int K) {
+// ============================================================================
+//  朴素 CUDA Kernel：每线程计算 C 的一个元素 (行 × 列)
+// ============================================================================
+__global__ void naiveMatrixMultiply(const float* A, const float* B, float* C,
+                                    int M, int N, int K) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -43,39 +74,39 @@ __global__ void naiveMatrixMultiply(const float* A, const float* B, float* C, in
     }
 }
 
-// Function to initialize matrix with random values
+// ----------------------------
+// (3) 随机初始化矩阵 (‑0.5 ~ 0.5)
+// ----------------------------
 void initializeMatrix(std::vector<float>& matrix, int rows, int cols) {
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<> dis(-0.5, 0.5);
-
-    for (int i = 0; i < rows * cols; ++i) {
-        matrix[i] = static_cast<float>(dis(gen));
-    }
+    std::mt19937 gen(std::random_device{}());
+    std::uniform_real_distribution<float> dis(-0.5f, 0.5f);
+    for (int i = 0; i < rows * cols; ++i) matrix[i] = dis(gen);
 }
 
-bool verifyResults(const std::vector<float>& expected, const std::vector<float>& actual, float tolerance = 1e-2) {
-    if (expected.size() != actual.size()) {
-        return false;
-    }
-
+// ----------------------------
+// (4) 结果校验：逐元素绝对误差 < tolerance
+// ----------------------------
+bool verifyResults(const std::vector<float>& expected,
+                   const std::vector<float>& actual,
+                   float tolerance = 1e-2f) {
+    if (expected.size() != actual.size()) return false;
     for (size_t i = 0; i < expected.size(); ++i) {
-        float rel_error = std::abs(expected[i] - actual[i]);
-        if (rel_error > tolerance) {
-            std::cout << "Mismatch at index " << i << ": expected " << expected[i] 
-                      << ", got " << actual[i] << ", relative error: " << rel_error << std::endl;
+        float abs_err = fabsf(expected[i] - actual[i]);
+        if (abs_err > tolerance) {
+            std::cout << "Mismatch @ " << i << ": expected "
+                      << expected[i] << ", got " << actual[i]
+                      << ", abs_err=" << abs_err << std::endl;
             return false;
         }
     }
-
     return true;
 }
 
-// New function for CUDA event-based timing
-float time_kernel(std::function<void()> kernel_func) {
+// ----------------------------
+// (5) 使用 CUDA Events 计时的工具函数
+// ----------------------------
+float time_kernel(const std::function<void()>& kernel_func) {
     cudaEvent_t start, stop;
-    float elapsed_time;
-
     CHECK_CUDA(cudaEventCreate(&start));
     CHECK_CUDA(cudaEventCreate(&stop));
 
@@ -84,188 +115,215 @@ float time_kernel(std::function<void()> kernel_func) {
     CHECK_CUDA(cudaEventRecord(stop));
     CHECK_CUDA(cudaEventSynchronize(stop));
 
-    CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
+    float ms = 0.0f;
+    CHECK_CUDA(cudaEventElapsedTime(&ms, start, stop));
 
     CHECK_CUDA(cudaEventDestroy(start));
     CHECK_CUDA(cudaEventDestroy(stop));
-
-    return elapsed_time;
+    return ms;
 }
 
-// Function to perform warmup and benchmark runs
-float benchmark_kernel(std::function<void()> kernel_func, int warmup_runs, int benchmark_runs) {
-    // Warmup runs
-    for (int i = 0; i < warmup_runs; ++i) {
-        kernel_func();
-    }
-    
-    // Benchmark runs
+// 重复多次求平均，含 warmup
+float benchmark_kernel(const std::function<void()>& kernel_func,
+                       int warmup_runs, int benchmark_runs) {
+    for (int i = 0; i < warmup_runs; ++i) kernel_func();
+
     std::vector<float> times;
-    for (int i = 0; i < benchmark_runs; ++i) {
-        float time = time_kernel(kernel_func);
-        times.push_back(time);
-    }
-    
-    // Calculate average time
-    float avg_time = std::accumulate(times.begin(), times.end(), 0.0f) / benchmark_runs;
-    return avg_time;
+    times.reserve(benchmark_runs);
+    for (int i = 0; i < benchmark_runs; ++i)
+        times.push_back(time_kernel(kernel_func));
+
+    return std::accumulate(times.begin(), times.end(), 0.0f) / benchmark_runs;
 }
 
+// ============================================================================
+//  主程序入口
+// ============================================================================
 int main() {
-    std::cout << "matrix size: " << M << "x" << K << " * " << K << "x" << N << std::endl;
-    std::vector<float> h_A(M * K), h_B(K * N), h_C(M * N);
+    std::cout << "Matrix GEMM size: " << M << "×" << K << "  *  "
+              << K << "×" << N << std::endl;
+
+    // ------------------------
+    // (1) 主机端内存准备
+    // ------------------------
+    std::vector<float> h_A(M * K), h_B(K * N);
+    std::vector<float> h_C_naive(M * N);
     std::vector<float> h_C_cublas_fp32(M * N), h_C_cublasLt_fp32(M * N);
     std::vector<float> h_C_cublas_fp16(M * N), h_C_cublasLt_fp16(M * N);
-    std::vector<float> h_C_naive(M * N);
 
     initializeMatrix(h_A, M, K);
     initializeMatrix(h_B, K, N);
 
+    // ------------------------
+    // (2) 设备端内存 (FP32 / FP16)
+    // ------------------------
     float *d_A, *d_B, *d_C;
-    half *d_A_half, *d_B_half, *d_C_half;
-
-    CHECK_CUDA(cudaMalloc(&d_A, M * K * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_B, K * N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_C, M * N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_A_half, M * K * sizeof(half)));
-    CHECK_CUDA(cudaMalloc(&d_B_half, K * N * sizeof(half)));
-    CHECK_CUDA(cudaMalloc(&d_C_half, M * N * sizeof(half)));
+    half  *d_A_h, *d_B_h, *d_C_h;
+    CHECK_CUDA(cudaMalloc(&d_A,  M * K * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_B,  K * N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_C,  M * N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_A_h, M * K * sizeof(half)));
+    CHECK_CUDA(cudaMalloc(&d_B_h, K * N * sizeof(half)));
+    CHECK_CUDA(cudaMalloc(&d_C_h, M * N * sizeof(half)));
 
     CHECK_CUDA(cudaMemcpy(d_A, h_A.data(), M * K * sizeof(float), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(d_B, h_B.data(), K * N * sizeof(float), cudaMemcpyHostToDevice));
 
-    // Convert to half precision
-    std::vector<half> h_A_half(M * K), h_B_half(K * N);
-    for (int i = 0; i < M * K; ++i) h_A_half[i] = __float2half(h_A[i]);
-    for (int i = 0; i < K * N; ++i) h_B_half[i] = __float2half(h_B[i]);
+    // 主机 FP16 缓冲区
+    std::vector<half> h_A_h(M * K), h_B_h(K * N);
+    for (int i = 0; i < M * K; ++i) h_A_h[i] = __float2half(h_A[i]);
+    for (int i = 0; i < K * N; ++i) h_B_h[i] = __float2half(h_B[i]);
+    CHECK_CUDA(cudaMemcpy(d_A_h, h_A_h.data(), M * K * sizeof(half), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(d_B_h, h_B_h.data(), K * N * sizeof(half), cudaMemcpyHostToDevice));
 
-    CHECK_CUDA(cudaMemcpy(d_A_half, h_A_half.data(), M * K * sizeof(half), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(d_B_half, h_B_half.data(), K * N * sizeof(half), cudaMemcpyHostToDevice));
+    // ------------------------
+    // (3) 创建 cuBLAS / cuBLASLt 句柄
+    // ------------------------
+    cublasHandle_t   cublas_handle;  CHECK_CUBLAS(cublasCreate(&cublas_handle));
+    cublasLtHandle_t cublasLt_handle;CHECK_CUBLAS(cublasLtCreate(&cublasLt_handle));
 
-    cublasHandle_t cublas_handle;
-    CHECK_CUBLAS(cublasCreate(&cublas_handle));
-
-    cublasLtHandle_t cublasLt_handle;
-    CHECK_CUBLAS(cublasLtCreate(&cublasLt_handle));
-
-    float alpha = 1.0f, beta = 0.0f;
-    half alpha_half = __float2half(1.0f), beta_half = __float2half(0.0f);
+    const float alpha = 1.0f, beta = 0.0f;
+    const half  alpha_h = __float2half(1.0f), beta_h = __float2half(0.0f);
 
     const int warmup_runs = 3;
-    const int benchmark_runs = 20;
+    const int bench_runs  = 20;
 
-    // cuBLAS FP32
-    float cublas_fp32_time = benchmark_kernel([&]() {
-        CHECK_CUBLAS(cublasSgemm(cublas_handle, CUBLAS_OP_N, CUBLAS_OP_N, N, M, K, &alpha, d_B, N, d_A, K, &beta, d_C, N));
-    }, warmup_runs, benchmark_runs);
-    std::cout << "cuBLAS FP32 average time: " << cublas_fp32_time << " ms" << std::endl;
-
+    // =====================================================================
+    // (4) cuBLAS SGEMM (FP32)
+    // =====================================================================
+    float t_cublas_fp32 = benchmark_kernel([&]() {
+        CHECK_CUBLAS(cublasSgemm(
+            cublas_handle,
+            CUBLAS_OP_N, CUBLAS_OP_N,
+            N, M, K,
+            &alpha,
+            d_B, N,
+            d_A, K,
+            &beta,
+            d_C, N));
+    }, warmup_runs, bench_runs);
+    std::cout << "cuBLAS  FP32 avg time: " << t_cublas_fp32 << " ms\n";
     CHECK_CUDA(cudaMemcpy(h_C_cublas_fp32.data(), d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost));
 
-    // cuBLASLt FP32
-    cublasLtMatmulDesc_t operationDesc = nullptr;
-    cublasLtMatrixLayout_t Adesc = nullptr, Bdesc = nullptr, Cdesc = nullptr;
-    CHECK_CUBLAS(cublasLtMatmulDescCreate(&operationDesc, CUBLAS_COMPUTE_32F, CUDA_R_32F));
-    CHECK_CUBLAS(cublasLtMatrixLayoutCreate(&Adesc, CUDA_R_32F, K, M, K)); // original M K M
-    CHECK_CUBLAS(cublasLtMatrixLayoutCreate(&Bdesc, CUDA_R_32F, N, K, N)); // original K N K
-    CHECK_CUBLAS(cublasLtMatrixLayoutCreate(&Cdesc, CUDA_R_32F, N, M, N)); // original M N M
+    // =====================================================================
+    // (5) cuBLASLt FP32 (Matmul)
+    // =====================================================================
+    cublasLtMatmulDesc_t opDesc32; CHECK_CUBLAS(cublasLtMatmulDescCreate(&opDesc32, CUBLAS_COMPUTE_32F, CUDA_R_32F));
+    cublasLtMatrixLayout_t A32, B32, C32;
+    CHECK_CUBLAS(cublasLtMatrixLayoutCreate(&A32, CUDA_R_32F, K, M, K));
+    CHECK_CUBLAS(cublasLtMatrixLayoutCreate(&B32, CUDA_R_32F, N, K, N));
+    CHECK_CUBLAS(cublasLtMatrixLayoutCreate(&C32, CUDA_R_32F, N, M, N));
 
-    float cublasLt_fp32_time = benchmark_kernel([&]() {
-        CHECK_CUBLAS(cublasLtMatmul(cublasLt_handle, operationDesc, &alpha, d_B, Bdesc, d_A, Adesc, &beta, d_C, Cdesc, d_C, Cdesc, nullptr, nullptr, 0, 0));
-    }, warmup_runs, benchmark_runs);
-    std::cout << "cuBLASLt FP32 average time: " << cublasLt_fp32_time << " ms" << std::endl;
-
+    float t_cublasLt_fp32 = benchmark_kernel([&]() {
+        CHECK_CUBLAS(cublasLtMatmul(
+            cublasLt_handle, opDesc32,
+            &alpha,
+            d_B, B32,
+            d_A, A32,
+            &beta,
+            d_C, C32,
+            d_C, C32,
+            nullptr, nullptr, 0, 0));
+    }, warmup_runs, bench_runs);
+    std::cout << "cuBLASLt FP32 avg time: " << t_cublasLt_fp32 << " ms\n";
     CHECK_CUDA(cudaMemcpy(h_C_cublasLt_fp32.data(), d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost));
 
-    // cuBLAS FP16
-    float cublas_fp16_time = benchmark_kernel([&]() {
-        CHECK_CUBLAS(cublasHgemm(cublas_handle, CUBLAS_OP_N, CUBLAS_OP_N, N, M, K, &alpha_half, d_B_half, N, d_A_half, K, &beta_half, d_C_half, N));
-    }, warmup_runs, benchmark_runs);
-    std::cout << "cuBLAS FP16 average time: " << cublas_fp16_time << " ms" << std::endl;
+    // =====================================================================
+    // (6) cuBLAS HGEMM (FP16)
+    // =====================================================================
+    float t_cublas_fp16 = benchmark_kernel([&]() {
+        CHECK_CUBLAS(cublasHgemm(
+            cublas_handle,
+            CUBLAS_OP_N, CUBLAS_OP_N,
+            N, M, K,
+            &alpha_h,
+            d_B_h, N,
+            d_A_h, K,
+            &beta_h,
+            d_C_h, N));
+    }, warmup_runs, bench_runs);
+    std::cout << "cuBLAS  FP16 avg time: " << t_cublas_fp16 << " ms\n";
 
-    std::vector<half> h_C_half(M * N);
-    CHECK_CUDA(cudaMemcpy(h_C_half.data(), d_C_half, M * N * sizeof(half), cudaMemcpyDeviceToHost));
-    for (int i = 0; i < M * N; ++i) h_C_cublas_fp16[i] = __half2float(h_C_half[i]);
+    std::vector<half> h_temp_h(M * N);
+    CHECK_CUDA(cudaMemcpy(h_temp_h.data(), d_C_h, M * N * sizeof(half), cudaMemcpyDeviceToHost));
+    for (int i = 0; i < M * N; ++i) h_C_cublas_fp16[i] = __half2float(h_temp_h[i]);
 
-    // cuBLASLt FP16
-    cublasLtMatmulDesc_t operationDesc_half = nullptr;
-    cublasLtMatrixLayout_t Adesc_half = nullptr, Bdesc_half = nullptr, Cdesc_half = nullptr;
-    CHECK_CUBLAS(cublasLtMatmulDescCreate(&operationDesc_half, CUBLAS_COMPUTE_16F, CUDA_R_16F));
-    CHECK_CUBLAS(cublasLtMatrixLayoutCreate(&Adesc_half, CUDA_R_16F, K, M, K)); 
-    CHECK_CUBLAS(cublasLtMatrixLayoutCreate(&Bdesc_half, CUDA_R_16F, N, K, N)); 
-    CHECK_CUBLAS(cublasLtMatrixLayoutCreate(&Cdesc_half, CUDA_R_16F, N, M, N)); 
+    // =====================================================================
+    // (7) cuBLASLt FP16 (Matmul)
+    // =====================================================================
+    cublasLtMatmulDesc_t opDesc16; CHECK_CUBLAS(cublasLtMatmulDescCreate(&opDesc16, CUBLAS_COMPUTE_16F, CUDA_R_16F));
+    cublasLtMatrixLayout_t A16, B16, C16;
+    CHECK_CUBLAS(cublasLtMatrixLayoutCreate(&A16, CUDA_R_16F, K, M, K));
+    CHECK_CUBLAS(cublasLtMatrixLayoutCreate(&B16, CUDA_R_16F, N, K, N));
+    CHECK_CUBLAS(cublasLtMatrixLayoutCreate(&C16, CUDA_R_16F, N, M, N));
 
-    float cublasLt_fp16_time = benchmark_kernel([&]() {
-        CHECK_CUBLAS(cublasLtMatmul(cublasLt_handle, operationDesc_half, &alpha_half, d_B_half, Bdesc_half, d_A_half, Adesc_half, &beta_half, d_C_half, Cdesc_half, d_C_half, Cdesc_half, nullptr, nullptr, 0, 0));
-    }, warmup_runs, benchmark_runs);
-    std::cout << "cuBLASLt FP16 average time: " << cublasLt_fp16_time << " ms" << std::endl;
+    float t_cublasLt_fp16 = benchmark_kernel([&]() {
+        CHECK_CUBLAS(cublasLtMatmul(
+            cublasLt_handle, opDesc16,
+            &alpha_h,
+            d_B_h, B16,
+            d_A_h, A16,
+            &beta_h,
+            d_C_h, C16,
+            d_C_h, C16,
+            nullptr, nullptr, 0, 0));
+    }, warmup_runs, bench_runs);
+    std::cout << "cuBLASLt FP16 avg time: " << t_cublasLt_fp16 << " ms\n";
 
-    CHECK_CUDA(cudaMemcpy(h_C_half.data(), d_C_half, M * N * sizeof(half), cudaMemcpyDeviceToHost));
-    for (int i = 0; i < M * N; ++i) h_C_cublasLt_fp16[i] = __half2float(h_C_half[i]);
+    CHECK_CUDA(cudaMemcpy(h_temp_h.data(), d_C_h, M * N * sizeof(half), cudaMemcpyDeviceToHost));
+    for (int i = 0; i < M * N; ++i) h_C_cublasLt_fp16[i] = __half2float(h_temp_h[i]);
 
-    // Naive CUDA kernel
-    dim3 blockDim(32, 32);
-    dim3 gridDim((N + blockDim.x - 1) / blockDim.x, (M + blockDim.y - 1) / blockDim.y);
+    // =====================================================================
+    // (8) 朴素 CUDA Kernel (FP32)
+    // =====================================================================
+    dim3 block(32, 32);
+    dim3 grid((N + block.x - 1) / block.x, (M + block.y - 1) / block.y);
 
-    float naive_cuda_time = benchmark_kernel([&]() {
-        naiveMatrixMultiply<<<gridDim, blockDim>>>(d_A, d_B, d_C, M, N, K);
-    }, warmup_runs, benchmark_runs);
-    std::cout << "Naive CUDA kernel average time: " << naive_cuda_time << " ms" << std::endl;
-
+    float t_naive = benchmark_kernel([&]() {
+        naiveMatrixMultiply<<<grid, block>>>(d_A, d_B, d_C, M, N, K);
+        CHECK_CUDA(cudaDeviceSynchronize());
+    }, warmup_runs, 5); // naive 较慢，跑 5 次即可
+    std::cout << "Naive   FP32 avg time: " << t_naive << " ms\n";
     CHECK_CUDA(cudaMemcpy(h_C_naive.data(), d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost));
 
-    // Verify results
-    // std::cout << "cublas_fp32: " << std::endl;
-    bool cublas_fp32_correct = verifyResults(h_C_naive, h_C_cublas_fp32, 1e-2);
-    // std::cout << "cublasLt_fp32: " << std::endl;
-    bool cublasLt_fp32_correct = verifyResults(h_C_naive, h_C_cublasLt_fp32, 1e-2);
-    // std::cout << "cublas_fp16: " << std::endl;
-    bool cublas_fp16_correct = verifyResults(h_C_naive, h_C_cublas_fp16, 5e-1);
-    // std::cout << "cublasLt_fp16: " << std::endl;
-    bool cublasLt_fp16_correct = verifyResults(h_C_naive, h_C_cublasLt_fp16, 5e-1);
-
-    // compute the max error for each of the fp16 results
-    float max_error_fp16_cublas = 0.0f;
-    float max_error_fp16_cublasLt = 0.0f;
-    for (int i = 0; i < M * N; ++i) {
-        float error = std::abs(h_C_naive[i] - h_C_cublas_fp16[i]);
-        if (error > max_error_fp16_cublas) {
-            max_error_fp16_cublas = error;
+    // =====================================================================
+    // (9) 结果校验 & 最大绝对误差 (仅与 Naive 比较)
+    // =====================================================================
+    auto max_abs_err = [](const std::vector<float>& ref, const std::vector<float>& test) {
+        float max_err = 0.0f;
+        for (size_t i = 0; i < ref.size(); ++i) {
+            float err = fabsf(ref[i] - test[i]);
+            if (err > max_err) max_err = err;
         }
-    }
-    for (int i = 0; i < M * N; ++i) {
-        float error = std::abs(h_C_naive[i] - h_C_cublasLt_fp16[i]);
-        if (error > max_error_fp16_cublasLt) {
-            max_error_fp16_cublasLt = error;
-        }
-    }
+        return max_err;
+    };
 
-    std::cout << "max error fp16 cublas: " << max_error_fp16_cublas << std::endl;
-    std::cout << "max error fp16 cublasLt: " << max_error_fp16_cublasLt << std::endl;
+    bool ok_cublas32   = verifyResults(h_C_naive, h_C_cublas_fp32, 1e-2f);
+    bool ok_cublasLt32 = verifyResults(h_C_naive, h_C_cublasLt_fp32, 1e-2f);
+    bool ok_cublas16   = verifyResults(h_C_naive, h_C_cublas_fp16, 5e-1f);
+    bool ok_cublasLt16 = verifyResults(h_C_naive, h_C_cublasLt_fp16, 5e-1f);
 
+    std::cout << "Max abs error (FP16 cuBLAS ) = " << max_abs_err(h_C_naive, h_C_cublas_fp16)   << std::endl;
+    std::cout << "Max abs error (FP16 cuBLASLt) = " << max_abs_err(h_C_naive, h_C_cublasLt_fp16) << std::endl;
 
-    std::cout << "cuBLAS FP32 results " << (cublas_fp32_correct ? "match" : "do not match") << " the naive kernel results within tolerance of 1e-2." << std::endl;
-    std::cout << "cuBLASLt FP32 results " << (cublasLt_fp32_correct ? "match" : "do not match") << " the naive kernel results within tolerance of 1e-2." << std::endl;
-    std::cout << "cuBLAS FP16 results " << (cublas_fp16_correct ? "match" : "do not match") << " the naive kernel results within tolerance of 5e-1." << std::endl;
-    std::cout << "cuBLASLt FP16 results " << (cublasLt_fp16_correct ? "match" : "do not match") << " the naive kernel results within tolerance of 5e-1." << std::endl;
+    std::cout << "cuBLAS   FP32 results " << (ok_cublas32   ? "match" : "NOT match") << " naive result\n";
+    std::cout << "cuBLASLt FP32 results " << (ok_cublasLt32 ? "match" : "NOT match") << " naive result\n";
+    std::cout << "cuBLAS   FP16 results " << (ok_cublas16   ? "match" : "NOT match") << " naive result (tolerance 0.5)\n";
+    std::cout << "cuBLASLt FP16 results " << (ok_cublasLt16 ? "match" : "NOT match") << " naive result (tolerance 0.5)\n";
 
-    // Clean up
-    CHECK_CUBLAS(cublasLtMatmulDescDestroy(operationDesc));
-    CHECK_CUBLAS(cublasLtMatrixLayoutDestroy(Adesc));
-    CHECK_CUBLAS(cublasLtMatrixLayoutDestroy(Bdesc));
-    CHECK_CUBLAS(cublasLtMatrixLayoutDestroy(Cdesc));
-    CHECK_CUBLAS(cublasLtMatmulDescDestroy(operationDesc_half));
-    CHECK_CUBLAS(cublasLtMatrixLayoutDestroy(Adesc_half));
-    CHECK_CUBLAS(cublasLtMatrixLayoutDestroy(Bdesc_half));
-    CHECK_CUBLAS(cublasLtMatrixLayoutDestroy(Cdesc_half));
+    // =====================================================================
+    // (10) 资源释放
+    // =====================================================================
+    CHECK_CUBLAS(cublasLtMatmulDescDestroy(opDesc32));
+    CHECK_CUBLAS(cublasLtMatmulDescDestroy(opDesc16));
+    CHECK_CUBLAS(cublasLtMatrixLayoutDestroy(A32)); CHECK_CUBLAS(cublasLtMatrixLayoutDestroy(B32)); CHECK_CUBLAS(cublasLtMatrixLayoutDestroy(C32));
+    CHECK_CUBLAS(cublasLtMatrixLayoutDestroy(A16)); CHECK_CUBLAS(cublasLtMatrixLayoutDestroy(B16)); CHECK_CUBLAS(cublasLtMatrixLayoutDestroy(C16));
+
     CHECK_CUBLAS(cublasLtDestroy(cublasLt_handle));
     CHECK_CUBLAS(cublasDestroy(cublas_handle));
-    CHECK_CUDA(cudaFree(d_A));
-    CHECK_CUDA(cudaFree(d_B));
-    CHECK_CUDA(cudaFree(d_C));
-    CHECK_CUDA(cudaFree(d_A_half));
-    CHECK_CUDA(cudaFree(d_B_half));
-    CHECK_CUDA(cudaFree(d_C_half));
+
+    CHECK_CUDA(cudaFree(d_A));   CHECK_CUDA(cudaFree(d_B));   CHECK_CUDA(cudaFree(d_C));
+    CHECK_CUDA(cudaFree(d_A_h)); CHECK_CUDA(cudaFree(d_B_h)); CHECK_CUDA(cudaFree(d_C_h));
 
     return 0;
 }
