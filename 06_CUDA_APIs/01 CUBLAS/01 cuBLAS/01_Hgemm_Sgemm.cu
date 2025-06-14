@@ -1,13 +1,22 @@
-// dedicated for small handwritten matrices
+// 专为小尺寸手写矩阵演示而设计的示例程序
+// 使用 CPU 计算、cuBLAS 单精度 (SGEMM) 与半精度 (HGEMM) 三种方式进行矩阵乘法
+// 运行环境：NVIDIA GPU + CUDA Toolkit + cuBLAS
+
 #include <stdio.h>
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <cuda_fp16.h>
 
-#define M 3
-#define K 4
-#define N 2
+// -------------------------
+// 定义矩阵尺寸 (M x K) * (K x N) = (M x N)
+// -------------------------
+#define M 3  // A 的行数、C 的行数
+#define K 4  // A 的列数、B 的行数
+#define N 2  // B 的列数、C 的列数
 
+// -------------------------
+// 错误检查宏：方便定位 CUDA 运行时与 cuBLAS API 的返回状态
+// -------------------------
 #define CHECK_CUDA(call) { \
     cudaError_t err = call; \
     if (err != cudaSuccess) { \
@@ -24,6 +33,9 @@
     } \
 }
 
+// -------------------------
+// 打印矩阵的辅助宏（按行主序）
+// -------------------------
 #undef PRINT_MATRIX
 #define PRINT_MATRIX(mat, rows, cols) \
     for (int i = 0; i < rows; i++) { \
@@ -33,6 +45,10 @@
     } \
     printf("\n");
 
+// -------------------------
+// CPU 端的朴素矩阵乘法实现，方便与 GPU 结果对比
+// C = A * B
+// -------------------------
 void cpu_matmul(float *A, float *B, float *C) {
     for (int i = 0; i < M; i++)
         for (int j = 0; j < N; j++) {
@@ -44,14 +60,36 @@ void cpu_matmul(float *A, float *B, float *C) {
 }
 
 int main() {
-    float A[M * K] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f, 11.0f, 12.0f};
-    float B[K * N] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
-    float C_cpu[M * N], C_cublas_s[M * N], C_cublas_h[M * N];
+    // -------------------------
+    // 1. 初始化主机端 (CPU) 数据
+    //    矩阵 A: (M x K)
+    //    矩阵 B: (K x N)
+    // -------------------------
+    float A[M * K] = {
+        1.0f,  2.0f,  3.0f,  4.0f,
+        5.0f,  6.0f,  7.0f,  8.0f,
+        9.0f, 10.0f, 11.0f, 12.0f
+    };
 
-    // CPU matmul
+    float B[K * N] = {
+        1.0f, 2.0f,
+        3.0f, 4.0f,
+        5.0f, 6.0f,
+        7.0f, 8.0f
+    };
+
+    float C_cpu[M * N];       // CPU 结果
+    float C_cublas_s[M * N];  // cuBLAS SGEMM 结果 (float32)
+    float C_cublas_h[M * N];  // cuBLAS HGEMM 结果 (float16 → float32)
+
+    // -------------------------
+    // 2. CPU 参考结果
+    // -------------------------
     cpu_matmul(A, B, C_cpu);
 
-    // CUDA setup
+    // -------------------------
+    // 3. 创建 cuBLAS 句柄并分配 GPU 内存
+    // -------------------------
     cublasHandle_t handle;
     CHECK_CUBLAS(cublasCreate(&handle));
 
@@ -60,37 +98,39 @@ int main() {
     CHECK_CUDA(cudaMalloc(&d_B, K * N * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&d_C, M * N * sizeof(float)));
 
+    // 拷贝数据到 GPU
     CHECK_CUDA(cudaMemcpy(d_A, A, M * K * sizeof(float), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(d_B, B, K * N * sizeof(float), cudaMemcpyHostToDevice));
 
-    // row major A = 
-    // 1.0 2.0 3.0 4.0
-    // 5.0 6.0 7.0 8.0
-
-    // col major A = 
-    // 1.0 5.0
-    // 2.0 6.0
-    // 3.0 7.0
-    // 4.0 8.0
-
-    // memory layout (row)
-    // 1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0
-
-    // memory layout (col)
-    // 1.0 5.0 2.0 6.0 3.0 7.0 4.0 8.0
-    
-    // cuBLAS SGEMM
+    // -------------------------
+    // 4. cuBLAS SGEMM (float32)
+    //    C = alpha * B * A + beta * C
+    //    注意：cuBLAS 采用列主序，参数顺序与常规数学公式略有不同
+    // -------------------------
     float alpha = 1.0f, beta = 0.0f;
-    CHECK_CUBLAS(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, N, M, K, &alpha, d_B, N, d_A, K, &beta, d_C, N));
+    // 此处使用 (N x M) 输出，因为 cuBLAS 按列主序存储
+    CHECK_CUBLAS(cublasSgemm(
+        handle,
+        CUBLAS_OP_N, CUBLAS_OP_N,  // 不转置
+        N, M, K,                   // C (N x M)
+        &alpha,
+        d_B, N,                   // B: (N x K) 列主序步长 N
+        d_A, K,                   // A: (K x M) 列主序步长 K
+        &beta,
+        d_C, N                    // C: (N x M) 列主序步长 N
+    ));
     CHECK_CUDA(cudaMemcpy(C_cublas_s, d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost));
 
-    // cuBLAS HGEMM
+    // -------------------------
+    // 5. cuBLAS HGEMM (float16)
+    //    先将 A、B 转为半精度，计算后再转回 float32 以便打印
+    // -------------------------
     half *d_A_h, *d_B_h, *d_C_h;
     CHECK_CUDA(cudaMalloc(&d_A_h, M * K * sizeof(half)));
     CHECK_CUDA(cudaMalloc(&d_B_h, K * N * sizeof(half)));
     CHECK_CUDA(cudaMalloc(&d_C_h, M * N * sizeof(half)));
 
-    // Convert to half precision on CPU
+    // 主机端临时 half 缓冲区
     half A_h[M * K], B_h[K * N];
     for (int i = 0; i < M * K; i++) {
         A_h[i] = __float2half(A[i]);
@@ -99,33 +139,53 @@ int main() {
         B_h[i] = __float2half(B[i]);
     }
 
-    // Copy half precision data to device
+    // 拷贝到 GPU
     CHECK_CUDA(cudaMemcpy(d_A_h, A_h, M * K * sizeof(half), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(d_B_h, B_h, K * N * sizeof(half), cudaMemcpyHostToDevice));
 
-    __half alpha_h = __float2half(1.0f), beta_h = __float2half(0.0f);
-    CHECK_CUBLAS(cublasHgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, N, M, K, &alpha_h, d_B_h, N, d_A_h, K, &beta_h, d_C_h, N));
+    // half 精度的 alpha / beta
+    __half alpha_h = __float2half(1.0f);
+    __half beta_h  = __float2half(0.0f);
 
-    // Copy result back to host and convert to float
+    CHECK_CUBLAS(cublasHgemm(
+        handle,
+        CUBLAS_OP_N, CUBLAS_OP_N,
+        N, M, K,
+        &alpha_h,
+        d_B_h, N,  // 注意步长依旧是列主序
+        d_A_h, K,
+        &beta_h,
+        d_C_h, N
+    ));
+
+    // 拷回并转 float 以便打印
     half C_h[M * N];
     CHECK_CUDA(cudaMemcpy(C_h, d_C_h, M * N * sizeof(half), cudaMemcpyDeviceToHost));
     for (int i = 0; i < M * N; i++) {
         C_cublas_h[i] = __half2float(C_h[i]);
     }
 
-    // Print results
+    // -------------------------
+    // 6. 打印结果对比
+    // -------------------------
     printf("Matrix A (%dx%d):\n", M, K);
     PRINT_MATRIX(A, M, K);
+
     printf("Matrix B (%dx%d):\n", K, N);
     PRINT_MATRIX(B, K, N);
+
     printf("CPU Result (%dx%d):\n", M, N);
     PRINT_MATRIX(C_cpu, M, N);
+
     printf("cuBLAS SGEMM Result (%dx%d):\n", M, N);
     PRINT_MATRIX(C_cublas_s, M, N);
+
     printf("cuBLAS HGEMM Result (%dx%d):\n", M, N);
     PRINT_MATRIX(C_cublas_h, M, N);
 
-    // Clean up
+    // -------------------------
+    // 7. 资源释放
+    // -------------------------
     CHECK_CUDA(cudaFree(d_A));
     CHECK_CUDA(cudaFree(d_B));
     CHECK_CUDA(cudaFree(d_C));
