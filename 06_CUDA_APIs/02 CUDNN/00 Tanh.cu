@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <math.h>
 
+/* 宏：检查 CUDA 调用是否成功 */
 #define CHECK_CUDA(call) { \
     cudaError_t err = call; \
     if (err != cudaSuccess) { \
@@ -12,6 +13,7 @@
     } \
 }
 
+/* 宏：检查 cuDNN 调用是否成功 */
 #define CHECK_CUDNN(call) { \
     cudnnStatus_t err = call; \
     if (err != CUDNN_STATUS_SUCCESS) { \
@@ -20,7 +22,7 @@
     } \
 }
 
-// Naive CUDA kernel for tanh activation
+/* 简单的 CUDA kernel：计算 tanh 激活 */
 __global__ void naiveTanhKernel(float* input, float* output, int size) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < size) {
@@ -28,19 +30,19 @@ __global__ void naiveTanhKernel(float* input, float* output, int size) {
     }
 }
 
-// Utility function for CPU verification
+/* CPU 端的 tanh 计算（用作验证） */
 float cpuTanh(float x) {
     return tanhf(x);
 }
 
-// Function to initialize data
+/* 初始化输入数据（范围 -1 到 1 的随机数） */
 void initializeData(float* data, int size) {
     for (int i = 0; i < size; ++i) {
-        data[i] = (float)rand() / RAND_MAX * 2.0f - 1.0f;  // Random values between -1 and 1
+        data[i] = (float)rand() / RAND_MAX * 2.0f - 1.0f;
     }
 }
 
-// Function to verify results
+/* 比较 CPU 与 GPU 结果是否一致 */
 bool verifyResults(float* cpu_output, float* gpu_output, int size, float tolerance = 1e-5) {
     for (int i = 0; i < size; ++i) {
         if (fabs(cpu_output[i] - gpu_output[i]) > tolerance) {
@@ -52,54 +54,54 @@ bool verifyResults(float* cpu_output, float* gpu_output, int size, float toleran
 }
 
 int main() {
-    // Set up tensor dimensions for a scenario where cuDNN is likely to outperform
-    const int batch_size = 256; // NCHW format
+    /* 设置张量维度（NCHW），此规模下 cuDNN 预期会优于手写 kernel */
+    const int batch_size = 256;
     const int channels = 32;
     const int height = 224;
     const int width = 224;
     const int tensor_size = batch_size * channels * height * width;
 
-    // Allocate host memory
+    /* 申请主机端内存 */
     float *h_input, *h_output_naive, *h_output_cudnn, *h_output_cpu;
     h_input = (float*)malloc(tensor_size * sizeof(float));
     h_output_naive = (float*)malloc(tensor_size * sizeof(float));
     h_output_cudnn = (float*)malloc(tensor_size * sizeof(float));
     h_output_cpu = (float*)malloc(tensor_size * sizeof(float));
 
-    // Initialize input data
+    /* 初始化输入数据 */
     initializeData(h_input, tensor_size);
 
-    // Allocate device memory
+    /* 申请设备端内存 */
     float *d_input, *d_output_naive, *d_output_cudnn;
     CHECK_CUDA(cudaMalloc(&d_input, tensor_size * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&d_output_naive, tensor_size * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&d_output_cudnn, tensor_size * sizeof(float)));
 
-    // Copy input data to device
+    /* 将输入数据拷贝到 GPU */
     CHECK_CUDA(cudaMemcpy(d_input, h_input, tensor_size * sizeof(float), cudaMemcpyHostToDevice));
 
-    // Create CUDA events for timing
+    /* 创建 CUDA 事件用于计时 */
     cudaEvent_t start, stop;
     CHECK_CUDA(cudaEventCreate(&start));
     CHECK_CUDA(cudaEventCreate(&stop));
 
-    // Warmup and benchmark parameters
+    /* 预热与基准测试参数 */
     const int num_warmup = 10;
     const int num_benchmark = 100;
     float naive_times[num_benchmark];
     float cudnn_times[num_benchmark];
 
-    // Naive CUDA kernel
+    /* 配置网格与线程块 */
     dim3 block(256);
     dim3 grid((tensor_size + block.x - 1) / block.x);
 
-    // Warmup runs for naive kernel
+    /* 预热：运行 naive kernel */
     for (int i = 0; i < num_warmup; ++i) {
         naiveTanhKernel<<<grid, block>>>(d_input, d_output_naive, tensor_size);
     }
     CHECK_CUDA(cudaDeviceSynchronize());
 
-    // Benchmark runs for naive kernel
+    /* 基准测试：naive kernel */
     for (int i = 0; i < num_benchmark; ++i) {
         CHECK_CUDA(cudaEventRecord(start));
         naiveTanhKernel<<<grid, block>>>(d_input, d_output_naive, tensor_size);
@@ -108,7 +110,7 @@ int main() {
         CHECK_CUDA(cudaEventElapsedTime(&naive_times[i], start, stop));
     }
 
-    // cuDNN setup
+    /* cuDNN 相关设置 */
     cudnnHandle_t cudnn;
     CHECK_CUDNN(cudnnCreate(&cudnn));
 
@@ -124,14 +126,14 @@ int main() {
 
     float alpha = 1.0f, beta = 0.0f;
 
-    // Warmup runs for cuDNN
+    /* 预热：cuDNN tanh 前向计算 */
     for (int i = 0; i < num_warmup; ++i) {
         CHECK_CUDNN(cudnnActivationForward(cudnn, activation_descriptor, &alpha, input_descriptor, d_input,
                                            &beta, input_descriptor, d_output_cudnn));
     }
     CHECK_CUDA(cudaDeviceSynchronize());
 
-    // Benchmark runs for cuDNN
+    /* 基准测试：cuDNN tanh */
     for (int i = 0; i < num_benchmark; ++i) {
         CHECK_CUDA(cudaEventRecord(start));
         CHECK_CUDNN(cudnnActivationForward(cudnn, activation_descriptor, &alpha, input_descriptor, d_input,
@@ -141,7 +143,7 @@ int main() {
         CHECK_CUDA(cudaEventElapsedTime(&cudnn_times[i], start, stop));
     }
 
-    // Calculate average times
+    /* 计算平均执行时间 */
     float avg_naive_time = 0.0f, avg_cudnn_time = 0.0f;
     for (int i = 0; i < num_benchmark; ++i) {
         avg_naive_time += naive_times[i];
@@ -150,20 +152,20 @@ int main() {
     avg_naive_time /= num_benchmark;
     avg_cudnn_time /= num_benchmark;
 
-    // Copy results back to host
+    /* 将结果拷贝回主机内存 */
     CHECK_CUDA(cudaMemcpy(h_output_naive, d_output_naive, tensor_size * sizeof(float), cudaMemcpyDeviceToHost));
     CHECK_CUDA(cudaMemcpy(h_output_cudnn, d_output_cudnn, tensor_size * sizeof(float), cudaMemcpyDeviceToHost));
 
-    // CPU verification
+    /* CPU 端计算 tanh 结果（用于对比） */
     for (int i = 0; i < tensor_size; ++i) {
         h_output_cpu[i] = cpuTanh(h_input[i]);
     }
 
-    // Verify results
+    /* 验证 GPU 结果正确性 */
     bool naive_correct = verifyResults(h_output_cpu, h_output_naive, tensor_size);
     bool cudnn_correct = verifyResults(h_output_cpu, h_output_cudnn, tensor_size);
 
-    // Print results
+    /* 打印性能数据与准确性检查 */
     printf("Tensor size: %d x %d x %d x %d\n", batch_size, channels, height, width);
     printf("Average Naive CUDA kernel time: %.3f ms\n", avg_naive_time);
     printf("Average cuDNN activation time: %.3f ms\n", avg_cudnn_time);
@@ -171,7 +173,7 @@ int main() {
     printf("Naive kernel results correct: %s\n", naive_correct ? "Yes" : "No");
     printf("cuDNN results correct: %s\n", cudnn_correct ? "Yes" : "No");
 
-    // Clean up
+    /* 资源释放 */
     CHECK_CUDA(cudaFree(d_input));
     CHECK_CUDA(cudaFree(d_output_naive));
     CHECK_CUDA(cudaFree(d_output_cudnn));
