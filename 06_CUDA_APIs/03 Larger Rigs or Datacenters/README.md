@@ -1,19 +1,114 @@
-**cuBLASmp** vs **NCCL** vs **MIG** (multi instance GPU)
+---
 
-## cuBLAS-mp
-- **NVIDIA cublasMp** is a high performance, multi-process, GPU accelerated library for distributed basic dense linear algebra. cublasMP for multi-gpu, single node level tensor ops. use this if a model cant fit on a single instance.
+## **cuBLAS-mp**
 
-## NCCL
-- NVIDIA Collective Communications Library ⇒ for dist cluster computing 
-- NCCL used for distributing information, collecting it, and acting as a general cluster level communicator. cublasMP is doing the grunt work of doing matmuls across 8xH100s and NCCL is going to run this in batches. remember “collective communications” ⇒ all-reduce, broadcast, gather, and scatter across multiple GPUs or nodes
-- in pytorch, you’d use Distributed Data Parallel ⇒ https://pytorch.org/tutorials/intermediate/ddp_tutorial.html, but if you’re writing GPT-5’s training run you’d want to pay CUDA experts to squeeze every bit of performance out at the datacenter level.
-- [CUDA MODE: NCCL Lecture](https://www.youtube.com/watch?v=T22e3fgit-A&ab_channel=CUDAMODE)
-- [Extended GPU Memory](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#extended-gpu-memory)
-- Model Parallelism (weights) VS Data parallelism (batches)
-- setup here ⇒ https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/overview.html
-- we can see all the operations here ⇒ https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api.html
+* **NVIDIA cuBLASmp** 是一个高性能的、多进程的、GPU加速的密集线性代数库，专为分布式计算设计。
+* 它用于 **多GPU、单节点** 环境下的张量运算，特别适合模型太大无法装入单张GPU显存时的场景。
+* 通俗理解：当模型太大，一张GPU装不下时，`cuBLASmp` 可以协调多个GPU一起做矩阵乘法等基础操作。
 
-## MIG (Multi-Instance GPU)
-- MIG ⇒ taking a big GPU and literally slicing it into smaller, independent GPUs
-- datacenter usecases where you get more value splitting one node into a bunch of others (customers might not be maxing out the compute utilization)
+---
 
+## **NCCL**
+
+* **NVIDIA Collective Communications Library（集体通信库）**，是 NVIDIA 提供的用于 **分布式集群通信** 的库。
+* **NCCL 主要用于**：分发信息、收集信息，以及作为一种通用的、跨 GPU 或跨节点的通信工具。
+* 提供典型的通信操作，如：**all-reduce**（全归约）、**broadcast**（广播）、**gather**（收集）、**scatter**（分发）等。
+* 举个例子：在 PyTorch 中用 `DistributedDataParallel (DDP)` 来做分布式训练，其底层就是用的 NCCL。
+
+  * 教程见：[PyTorch DDP 教程](https://pytorch.org/tutorials/intermediate/ddp_tutorial.html)
+* 如果你是在训练 GPT-5 级别的大模型，想要在数据中心级别榨干每一滴性能，那就需要 CUDA 专家来手动优化 NCCL 和底层通信。
+* 相关参考：
+
+  * [CUDA MODE: NCCL 视频讲解](https://www.youtube.com/watch?v=T22e3fgit-A&ab_channel=CUDAMODE)
+  * [扩展 GPU 显存说明](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#extended-gpu-memory)
+  * [NCCL 官方文档（模型并行 vs 数据并行说明）](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/overview.html)
+  * [NCCL 所有通信 API](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api.html)
+
+---
+
+## **MIG（Multi-Instance GPU，多实例 GPU）**
+
+* **MIG** 是指把一块大型 GPU 切分成多个小的、相互独立的 GPU 实例。
+* 每个 MIG 实例都像是一个独立的“虚拟 GPU”，拥有自己的一部分计算核心和显存。
+* 常用于数据中心场景，例如客户的计算需求并不高、无法满负载使用整张 GPU，那么可以将其“分租”为多个小实例，提高资源利用率与性价比。
+
+---
+
+当然可以。下面是 **cuBLASmp、NCCL、MIG** 三者的**核心区别、适用场景、技术关系**的详细总结与对比：
+
+---
+
+## 🧠 概念定位总结（一句话解释）
+
+| 名称           | 作用一句话总结                          |
+| ------------ | -------------------------------- |
+| **cuBLASmp** | 在**单个节点、多张GPU上做高性能张量计算**（如矩阵乘）   |
+| **NCCL**     | 负责在**多GPU或多节点之间做高效通信**（如广播、归约）   |
+| **MIG**      | 把一张大GPU**切割成多个小GPU**，支持多用户/多任务共享 |
+
+---
+
+## 📌 适用场景对比
+
+| 技术           | 适合的应用场景                         | 说明                                                          |
+| ------------ | ------------------------------- | ----------------------------------------------------------- |
+| **cuBLASmp** | 单机 4/8 张 GPU 的大模型训练（模型太大装不下单张卡） | 提供多GPU间**高效矩阵计算和张量操作**支持。典型用在模型并行。                          |
+| **NCCL**     | 多卡/多节点的分布式训练                    | 支持 **数据并行、模型并行**中的通信同步（如 all-reduce 梯度）。训练 GPT/BERT/RLHF 必备 |
+| **MIG**      | 多租户共享 GPU、推理部署、多任务并行测试          | 一个 A100 可以“变身”为 7 张独立小卡，可租用给多个轻量任务，提高硬件利用率                  |
+
+---
+
+## 🧪 技术功能对比
+
+| 技术名      | 主要用途             | 是否支持多卡通信    | 是否做张量计算 | 是否需要多节点 |
+| -------- | ---------------- | ----------- | ------- | ------- |
+| cuBLASmp | 张量计算（matmul）     | ✅（单机多GPU）   | ✅       | ❌（单机）   |
+| NCCL     | 通信（如 all-reduce） | ✅（多GPU/多节点） | ❌       | ✅       |
+| MIG      | 虚拟化硬件资源          | ❌（彼此独立）     | ✅（但隔离）  | ❌       |
+
+---
+
+## 🛠 使用方式/工具链结合（工程应用）
+
+| 技术       | 工程中常见搭配                                                        |
+| -------- | -------------------------------------------------------------- |
+| cuBLASmp | CUDA C++ / PyTorch 自定义 operator，适用于 GPT 多层/分片训练                |
+| NCCL     | PyTorch DDP / Megatron-LM / DeepSpeed / TensorFlow MultiWorker |
+| MIG      | Kubernetes + MIG 资源调度 / Triton 推理服务器 / 多租户平台                   |
+
+---
+
+## 🧩 它们之间的关系（图示）
+
+```
+            ┌────────────┐
+            │   GPU 卡   │
+            └────┬───────┘
+                 ▼
+        ┌────────────────┐
+        │ 使用 cuBLASmp   │← 做多卡 matmul
+        └────────────────┘
+                 ↓
+        ┌────────────────┐
+        │ NCCL 做通信同步 │← all-reduce、广播
+        └────────────────┘
+                 
+        ┌────────────────────┐
+        │（可选）开启 MIG模式 │← 切成多个小GPU并独立运行
+        └────────────────────┘
+```
+
+---
+
+## ✅ 总结建议（实际应用时该怎么选？）
+
+| 场景          | 推荐用法                             |
+| ----------- | -------------------------------- |
+| 大模型训练（模型太大） | **cuBLASmp + NCCL**（模型并行 + 通信同步） |
+| 大规模分布式训练    | **NCCL + DDP/ZeRO**（数据并行 + 通信优化） |
+| 多人/多任务共享资源  | **MIG 模式 + 多容器/K8s**             |
+| 小模型推理部署     | **MIG 实例化多个 GPU**，分别部署模型副本       |
+
+---
+
+如果你有具体的系统架构（比如训练 GPT、大规模推荐系统、多用户云平台等），我可以基于你的需求进一步推荐该选哪一种组合。是否需要我帮你做具体推荐？
